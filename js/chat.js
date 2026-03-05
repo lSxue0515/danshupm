@@ -25,6 +25,7 @@ var _stkMountGroupFilter = '全部'; // 表情包挂载分组筛选
 var _convLetAvatar = '';
 var _convRightAvatar = '';
 var _pendingImageData = null; // 待发送的图片base64
+var _chatLastUserImageCache = {}; // ★ roleId -> 用户最近发送的图片data（供换头像用）
 
 // ★ 亲密付系统
 var _familyCards = [];
@@ -2310,6 +2311,8 @@ function sendChatMessage() {
         var imgMsg = { from: 'self', text: text || '[图片]', time: ts, image: true, imageData: _pendingImageData };
         // ★ 图片存IndexedDB，不塞localStorage
         if (typeof dsSaveImageMsg === 'function') dsSaveImageMsg(_chatCurrentConv, imgMsg);
+        // ★ 缓存最近一张用户图片，供角色换头像功能使用
+        _chatLastUserImageCache[_chatCurrentConv] = _pendingImageData;
         if (_chatQuoteData) { imgMsg.quoteText = _chatQuoteData.text; imgMsg.quoteName = _chatQuoteData.name; }
         role.msgs.push(imgMsg);
         role.lastMsg = '[图片]'; role.lastTime = now.getTime(); role.lastTimeStr = ts;
@@ -2595,6 +2598,40 @@ function continueChat() {
                     })(rTxId, role);
                 }
                 interceptTransferIntent(role, msgObj);
+
+                // ★ 检测AI换头像指令 [set_avatar]
+                if (/\[set_avatar\]/i.test(txt)) {
+                    txt = txt.replace(/\[set_avatar\]/gi, '').trim();
+                    msgObj.text = txt || '好～';
+                    var _newAv = _chatLastUserImageCache[role.id] || null;
+                    if (_newAv) {
+                        (function (roleRef, imgData) {
+                            setTimeout(function () {
+                                roleRef.avatar = imgData;
+                                _convLeftAvatar = imgData;
+                                saveChatRoles();
+                                // 刷新对话页顶部头像
+                                var avEl = document.getElementById('convAvLeft');
+                                if (avEl) { avEl.src = imgData; }
+                                else {
+                                    var box = document.querySelectorAll('.chat-conv-av-box')[0];
+                                    if (box) box.innerHTML = '<img src="' + imgData + '" id="convAvLeft" alt="">';
+                                }
+                                // 刷新聊天气泡里的角色头像（已渲染的）
+                                var bubbleAvs = document.querySelectorAll('.chat-bubble-row .chat-bubble-avatar');
+                                for (var bi = 0; bi < bubbleAvs.length; bi++) {
+                                    var bImg = bubbleAvs[bi].querySelector('img');
+                                    if (bImg && !bImg.closest('.chat-bubble-row.self')) {
+                                        bImg.src = imgData;
+                                    }
+                                }
+                                showToast(roleRef.name + ' 已更换头像');
+                                // 同时刷新消息列表
+                                if (_chatCurrentTab === 'messages') renderChatTab('messages');
+                            }, 400);
+                        })(role, _newAv);
+                    }
+                }
 
                 role.msgs.push(msgObj);
                 var msgIdx = role.msgs.length - 1;
@@ -2937,6 +2974,14 @@ function buildChatMessages(role) {
         sp += '- [trans] 标记必须单独一行\n';
         sp += '- 翻译要自然通顺，不要生硬的机翻\n';
     }
+
+    // ★ 换头像系统说明
+    sp += '\n# 换头像系统\n';
+    sp += '如果 ' + userName + ' 在聊天中发了一张图片给你，并明确要求你换上那张头像（例如"把这个设成你头像""换上这张""用这个当头像"等），\n';
+    sp += '你需要在文字回复的最后另起一行加上：\n';
+    sp += '[set_avatar]\n';
+    sp += '系统会自动把对方刚才发的图片设置为你的头像。\n';
+    sp += '只有用户明确提出换头像要求时才使用，不可随意触发。[set_avatar] 必须单独一行，不能混在文字中。\n';
 
     messages.push({ role: 'system', content: sp });
 
@@ -5795,4 +5840,9 @@ function getMemoryAndTimePrompt(role) {
     }
 
     return parts.join('\n\n');
+}
+
+/* ★ 获取指定角色最近一次用户发送的图片（换头像用） */
+function _chatGetLastUserImage(roleId) {
+    return _chatLastUserImageCache[roleId] || null;
 }
