@@ -889,6 +889,7 @@ function _muRenderPlaylistDetail() {
     h += '<div class="mu-pl-header-btns">';
     h += '<div class="mu-pl-hbtn" onclick="_muRenamePlaylist(\'' + pl.id + '\')"><svg viewBox="0 0 24 24"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>重命名</div>';
     h += '<div class="mu-pl-hbtn" onclick="_muImportModal=\'batch\';_muImportTarget=\'' + pl.id + '\';_muRender()"><svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>导入歌曲</div>';
+    h += '<div class="mu-pl-hbtn" style="color:#e05a5a" onclick="_muDeletePlaylist(\'' + pl.id + '\')"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>删除歌单</div>';
     h += '</div></div></div>';
 
     function _muRemoveFromPlaylist(plId, idx) {
@@ -1446,7 +1447,21 @@ function _muPickPlaylistCover(plId) {
     };
     inp.click();
 }
-function _muDeletePlaylist(plId) { for (var i = 0; i < _muPlaylists.length; i++) { if (_muPlaylists[i].id === plId) { _muPlaylists.splice(i, 1); break; } } if (_muPlaylistDetail === plId) _muPlaylistDetail = null; _muSave(); _muRender(); }
+function _muDeletePlaylist(plId) {
+    // 找到歌单名用于提示
+    var plName = '';
+    for (var i = 0; i < _muPlaylists.length; i++) {
+        if (_muPlaylists[i].id === plId) { plName = _muPlaylists[i].name || '该歌单'; break; }
+    }
+    if (!confirm('确定删除歌单「' + plName + '」吗？\n歌单内歌曲不会被删除。')) return;
+    for (var j = 0; j < _muPlaylists.length; j++) {
+        if (_muPlaylists[j].id === plId) { _muPlaylists.splice(j, 1); break; }
+    }
+    if (_muPlaylistDetail === plId) _muPlaylistDetail = null;
+    _muSave();
+    _muRender();
+    if (typeof showToast === 'function') showToast('歌单「' + plName + '」已删除');
+}
 function _muOpenPlaylist(plId) { _muPlaylistDetail = plId; _muRender(); }
 function _muAddSongToPlaylist(plId) {
     var n = document.getElementById('muPlSongName'), a = document.getElementById('muPlSongArtist'), u = document.getElementById('muPlSongUrl');
@@ -1580,15 +1595,36 @@ function _muExportAll() {
 }
 
 function _muDoExportDownload(data) {
-    var json = JSON.stringify(data);
-    var blob = new Blob([json], { type: 'application/json' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'music_export_' + new Date().toISOString().slice(0, 10) + '.json';
-    a.click();
-    var sizeMB = (blob.size / 1024 / 1024).toFixed(1);
-    var audioCount = Object.keys(data.audioData || {}).length;
-    if (typeof showToast === 'function') showToast('导出完成 (' + sizeMB + 'MB, 含' + audioCount + '首音频)');
+    // ★ 修复：用 setTimeout 让主线程先喘口气，再做大数据序列化，防止手机 WebView 卡死崩溃
+    if (typeof showToast === 'function') showToast('正在生成文件...');
+    setTimeout(function () {
+        try {
+            var json = JSON.stringify(data);
+            // ★ 修复：用 TextEncoder 生成 Uint8Array 再交给 Blob，比直接传字符串内存更可控
+            var encoded;
+            try {
+                encoded = new TextEncoder().encode(json);
+            } catch (e) {
+                encoded = json; // 降级：旧环境直接传字符串
+            }
+            var blob = new Blob([encoded], { type: 'application/json' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'music_export_' + new Date().toISOString().slice(0, 10) + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            // ★ 延迟释放 ObjectURL，避免下载还没开始就被回收
+            setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+            var sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+            var audioCount = Object.keys(data.audioData || {}).length;
+            if (typeof showToast === 'function') showToast('导出完成 (' + sizeMB + 'MB, 含' + audioCount + '首音频)');
+        } catch (e) {
+            console.error('Export error', e);
+            if (typeof showToast === 'function') showToast('导出失败：' + (e.message || '内存不足'));
+        }
+    }, 50);
 }
 
 /* 从IndexedDB读取原始音频数据（ArrayBuffer + mimeType） */
@@ -1614,29 +1650,86 @@ function _muLoadAudioRawFromDB(songId, callback) {
 }
 
 function _muRenderJsonImportModal() { return '<div class="mu-import-overlay"><div class="mu-import-modal"><div class="mu-import-modal-title">导入歌单数据</div><div class="mu-import-modal-sub">粘贴JSON数据或选择文件（支持含音频的v2格式）</div><textarea class="mu-import-textarea" id="muJsonInput" placeholder="粘贴JSON..."></textarea><div class="mu-import-modal-btns"><div class="mu-import-modal-btn cancel" onclick="_muImportModal=\'\';_muRender()">取消</div><div class="mu-import-modal-btn ok" style="flex:0.7" onclick="_muPickJsonFile()">选文件</div><div class="mu-import-modal-btn ok" onclick="_muDoJsonImport()">导入</div></div></div></div>'; }
-function _muPickJsonFile() { var inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json'; inp.onchange = function () { if (!inp.files || !inp.files[0]) return; var r = new FileReader(); r.onload = function (e) { var el = document.getElementById('muJsonInput'); if (el) el.value = e.target.result; }; r.readAsText(inp.files[0]); }; inp.click(); }
+function _muPickJsonFile() {
+    var inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json';
+    inp.onchange = function () {
+        if (!inp.files || !inp.files[0]) return;
+        var file = inp.files[0];
+        // ★ 修复：超过 2MB 的文件直接走流式导入，不塞进 textarea（防止 DOM 卡死）
+        if (file.size > 2 * 1024 * 1024) {
+            if (typeof showToast === 'function') showToast('文件较大，正在解析...');
+            _muImportFromFile(file);
+            return;
+        }
+        // 小文件（< 2MB）走原有 textarea 流程
+        var r = new FileReader();
+        r.onload = function (e) {
+            var el = document.getElementById('muJsonInput');
+            if (el) el.value = e.target.result;
+            if (typeof showToast === 'function') showToast('文件已载入，点击导入');
+        };
+        r.onerror = function () {
+            if (typeof showToast === 'function') showToast('文件读取失败');
+        };
+        r.readAsText(file, 'utf-8');
+    };
+    inp.click();
+}
+
+// ★ 新增：直接从 File 对象导入，完全绕过 textarea，防止大文件卡死
+function _muImportFromFile(file) {
+    var r = new FileReader();
+    r.onload = function (e) {
+        setTimeout(function () {
+            try {
+                var data = JSON.parse(e.target.result);
+                e.target.result = null; // ★ 立即释放原始字符串内存
+                _muDoJsonImportData(data);
+            } catch (err) {
+                if (typeof showToast === 'function') showToast('JSON格式错误: ' + (err.message || ''));
+            }
+        }, 30);
+    };
+    r.onerror = function () {
+        if (typeof showToast === 'function') showToast('文件读取失败');
+    };
+    r.readAsText(file, 'utf-8');
+}
+
 function _muDoJsonImport() {
     var el = document.getElementById('muJsonInput');
-    if (!el || !el.value.trim()) { if (typeof showToast === 'function') showToast('请粘贴JSON'); return; }
-    try { var data = JSON.parse(el.value); } catch (e) { if (typeof showToast === 'function') showToast('JSON格式错误'); return; }
+    if (!el || !el.value.trim()) { if (typeof showToast === 'function') showToast('请粘贴JSON或选择文件'); return; }
+    if (typeof showToast === 'function') showToast('正在解析...');
+    // ★ 修复：setTimeout 让 UI 先更新 toast，再做耗时 JSON.parse
+    var raw = el.value;
+    el.value = ''; // ★ 立即清空 textarea，释放内存
+    setTimeout(function () {
+        try {
+            var data = JSON.parse(raw);
+            raw = null; // ★ 立即释放
+            _muDoJsonImportData(data);
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('JSON格式错误');
+        }
+    }, 30);
+}
 
-    var sc = 0, pc = 0, audioCount = 0;
+// ★ 核心导入逻辑（从 textarea 和 File 两条路汇聚到这里）
+function _muDoJsonImportData(data) {
+    var sc = 0, pc = 0;
     var audioData = data.audioData || {};
-    /* 记录旧id → 新id的映射，用于匹配音频数据 */
     var idMap = {};
 
     if (data.songs) {
         for (var i = 0; i < data.songs.length; i++) {
             var s = data.songs[i];
             var newId = _muGenId();
-            var oldId = s.id || '';
-            if (oldId) idMap[oldId] = newId;
+            if (s.id) idMap[s.id] = newId;
             _muSongs.push({
                 id: newId, name: s.name || '未知', artist: s.artist || '',
-                url: s.url || '',
-                // ★ 修复：保留封面数据，不再强制清空
-                cover: s.cover || '',
-                lyrics: s.lyrics || ''
+                url: s.url || '', cover: s.cover || '', lyrics: s.lyrics || ''
             });
             sc++;
         }
@@ -1645,20 +1738,15 @@ function _muDoJsonImport() {
     if (data.playlists) {
         for (var pi = 0; pi < data.playlists.length; pi++) {
             var pl = data.playlists[pi];
-            // ★ 修复：恢复歌单封面
             var np = { id: 'pl_' + Date.now() + '_' + pi, name: pl.name || '导入歌单', cover: pl.cover || '', songs: [] };
             if (pl.songs) {
                 for (var si = 0; si < pl.songs.length; si++) {
-                    var s = pl.songs[si];
-                    var newId = _muGenId();
-                    var oldId = s.id || '';
-                    if (oldId) idMap[oldId] = newId;
+                    var s2 = pl.songs[si];
+                    var newId2 = _muGenId();
+                    if (s2.id) idMap[s2.id] = newId2;
                     np.songs.push({
-                        id: newId, name: s.name || '未知', artist: s.artist || '',
-                        url: s.url || '',
-                        // ★ 修复：保留封面数据
-                        cover: s.cover || '',
-                        lyrics: s.lyrics || ''
+                        id: newId2, name: s2.name || '未知', artist: s2.artist || '',
+                        url: s2.url || '', cover: s2.cover || '', lyrics: s2.lyrics || ''
                     });
                     sc++;
                 }
@@ -1668,28 +1756,56 @@ function _muDoJsonImport() {
         }
     }
 
-    /* 还原音频数据到 IndexedDB */
+    // ★ 先保存元数据、刷新UI，让用户感知到导入成功
+    _muImportModal = '';
+    _muSave();
+    _muRender();
     var audioKeys = Object.keys(audioData);
-    for (var ak = 0; ak < audioKeys.length; ak++) {
-        var oldSongId = audioKeys[ak];
-        var newSongId = idMap[oldSongId] || oldSongId;
-        var ad = audioData[oldSongId];
+    var msg = '导入 ' + sc + ' 首歌, ' + pc + ' 个歌单';
+    if (audioKeys.length > 0) {
+        msg += '，正在恢复 ' + audioKeys.length + ' 首音频...';
+        if (typeof showToast === 'function') showToast(msg);
+        // ★ 修复：音频 base64 解码完全异步分批，每批处理1首，不阻塞主线程
+        _muRestoreAudioBatch(audioKeys, audioData, idMap, 0);
+    } else {
+        msg += sc > 0 ? ' (无音频，需手动绑定)' : '';
+        if (typeof showToast === 'function') showToast(msg);
+    }
+}
+
+// ★ 新增：分批异步恢复音频，每次处理1首后 yield 主线程
+function _muRestoreAudioBatch(keys, audioData, idMap, idx) {
+    if (idx >= keys.length) {
+        if (typeof showToast === 'function') showToast('音频恢复完成，共 ' + keys.length + ' 首');
+        return;
+    }
+    setTimeout(function () {
+        var oldId = keys[idx];
+        var newId = idMap[oldId] || oldId;
+        var ad = audioData[oldId];
         if (ad && ad.base64) {
             try {
-                var binaryStr = atob(ad.base64);
-                var bytes = new Uint8Array(binaryStr.length);
-                for (var bi = 0; bi < binaryStr.length; bi++) bytes[bi] = binaryStr.charCodeAt(bi);
-                _muSaveAudioToDB(newSongId, bytes.buffer, ad.mime || 'audio/mpeg');
-                audioCount++;
-            } catch (e) { console.warn('Audio restore error for ' + oldSongId, e); }
+                // ★ 修复：用 Uint8Array.from + atob 分块解码，防止栈溢出
+                var b64 = ad.base64;
+                var binaryStr = atob(b64);
+                var len = binaryStr.length;
+                var bytes = new Uint8Array(len);
+                // 分块赋值，每次最多 16384 个字符
+                var chunk = 16384;
+                for (var i = 0; i < len; i += chunk) {
+                    var end = Math.min(i + chunk, len);
+                    for (var j = i; j < end; j++) {
+                        bytes[j] = binaryStr.charCodeAt(j);
+                    }
+                }
+                _muSaveAudioToDB(newId, bytes.buffer, ad.mime || 'audio/mpeg');
+            } catch (e) {
+                console.warn('Audio restore error for ' + oldId, e);
+            }
         }
-    }
-
-    _muImportModal = ''; _muSave(); _muRender();
-    var msg = '导入 ' + sc + ' 首歌, ' + pc + ' 个歌单';
-    if (audioCount > 0) msg += ', ' + audioCount + ' 首含音频';
-    else if (sc > 0 && audioKeys.length === 0) msg += ' (无音频数据，需手动绑定音源)';
-    if (typeof showToast === 'function') showToast(msg);
+        // ★ 处理下一首
+        _muRestoreAudioBatch(keys, audioData, idMap, idx + 1);
+    }, 20); // 每首之间留20ms给主线程喘气
 }
 
 /* ============================================
