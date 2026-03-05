@@ -1571,27 +1571,42 @@ function _muExportAll() {
     var pending = uniqueIds.length;
     if (pending === 0) { _muDoExportDownload(data); return; }
 
-    var done = 0;
-    for (var ai = 0; ai < uniqueIds.length; ai++) {
-        (function (sid) {
-            _muLoadAudioRawFromDB(sid, function (result) {
-                if (result && result.arrayBuffer) {
-                    // ArrayBuffer → base64（分块处理，避免大文件栈溢出）
-                    var bytes = new Uint8Array(result.arrayBuffer);
-                    var chunkSize = 8192, binary = '';
-                    for (var bi = 0; bi < bytes.length; bi += chunkSize) {
-                        binary += String.fromCharCode.apply(null, bytes.subarray(bi, bi + chunkSize));
-                    }
-                    data.audioData[sid] = {
-                        base64: btoa(binary),
-                        mime: result.mimeType || 'audio/mpeg'
-                    };
-                }
-                done++;
-                if (done >= pending) _muDoExportDownload(data);
-            });
-        })(uniqueIds[ai]);
+    // ★ 修复iOS：不并发读取所有音频，改为逐首串行处理，避免内存中同时存多份 ArrayBuffer
+    _muExportAudioSerial(uniqueIds, data, 0, pending);
+}
+
+function _muExportAudioSerial(ids, data, idx, total) {
+    if (idx >= total) {
+        _muDoExportDownload(data);
+        return;
     }
+    var sid = ids[idx];
+    _muLoadAudioRawFromDB(sid, function (result) {
+        if (result && result.arrayBuffer) {
+            try {
+                var bytes = new Uint8Array(result.arrayBuffer);
+                // ★ 分块拼接 binary string，避免栈溢出
+                var chunkSize = 8192, binary = '';
+                for (var bi = 0; bi < bytes.length; bi += chunkSize) {
+                    binary += String.fromCharCode.apply(null, bytes.subarray(bi, bi + chunkSize));
+                }
+                data.audioData[sid] = {
+                    base64: btoa(binary),
+                    mime: result.mimeType || 'audio/mpeg'
+                };
+                binary = null; // ★ 立即释放
+            } catch (e) {
+                console.warn('Export audio encode error:', sid, e);
+            }
+        }
+        // ★ 每首之间给主线程 30ms 喘息，iOS 不会因连续大计算被杀
+        if (typeof showToast === 'function' && idx % 3 === 0) {
+            showToast('打包中 ' + (idx + 1) + '/' + total + '...');
+        }
+        setTimeout(function () {
+            _muExportAudioSerial(ids, data, idx + 1, total);
+        }, 30);
+    });
 }
 
 function _muDoExportDownload(data) {
@@ -1608,17 +1623,35 @@ function _muDoExportDownload(data) {
                 encoded = json; // 降级：旧环境直接传字符串
             }
             var blob = new Blob([encoded], { type: 'application/json' });
+            var sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+            var audioCount = Object.keys(data.audioData || {}).length;
+            var fileName = 'music_export_' + new Date().toISOString().slice(0, 10) + '.json';
+
+            // ★ 修复iOS：优先用 Web Share API（iOS Safari 唯一可靠的文件分享方式）
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: 'application/json' })] })) {
+                var shareFile = new File([blob], fileName, { type: 'application/json' });
+                navigator.share({ files: [shareFile], title: '音乐歌单导出' })
+                    .then(function () {
+                        if (typeof showToast === 'function') showToast('导出完成 (' + sizeMB + 'MB, 含' + audioCount + '首音频)');
+                    })
+                    .catch(function (e) {
+                        // 用户取消分享，不报错
+                        if (e.name !== 'AbortError') {
+                            if (typeof showToast === 'function') showToast('分享失败: ' + e.message);
+                        }
+                    });
+                return;
+            }
+
+            // ★ 安卓/桌面：用传统 a.click() 下载
             var url = URL.createObjectURL(blob);
             var a = document.createElement('a');
             a.href = url;
-            a.download = 'music_export_' + new Date().toISOString().slice(0, 10) + '.json';
+            a.download = fileName;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            // ★ 延迟释放 ObjectURL，避免下载还没开始就被回收
             setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
-            var sizeMB = (blob.size / 1024 / 1024).toFixed(1);
-            var audioCount = Object.keys(data.audioData || {}).length;
             if (typeof showToast === 'function') showToast('导出完成 (' + sizeMB + 'MB, 含' + audioCount + '首音频)');
         } catch (e) {
             console.error('Export error', e);
@@ -1653,44 +1686,44 @@ function _muRenderJsonImportModal() { return '<div class="mu-import-overlay"><di
 function _muPickJsonFile() {
     var inp = document.createElement('input');
     inp.type = 'file';
-    inp.accept = '.json';
+    inp.accept = '.json,application/json';
+    // ★ 修复安卓：必须挂载到 DOM，否则 Chrome onchange 不触发
+    inp.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+    document.body.appendChild(inp);
+
     inp.onchange = function () {
+        // ★ 用完立即移除
+        if (inp.parentNode) document.body.removeChild(inp);
         if (!inp.files || !inp.files[0]) return;
         var file = inp.files[0];
-        // ★ 修复：超过 2MB 的文件直接走流式导入，不塞进 textarea（防止 DOM 卡死）
-        if (file.size > 2 * 1024 * 1024) {
-            if (typeof showToast === 'function') showToast('文件较大，正在解析...');
-            _muImportFromFile(file);
-            return;
-        }
-        // 小文件（< 2MB）走原有 textarea 流程
-        var r = new FileReader();
-        r.onload = function (e) {
-            var el = document.getElementById('muJsonInput');
-            if (el) el.value = e.target.result;
-            if (typeof showToast === 'function') showToast('文件已载入，点击导入');
-        };
-        r.onerror = function () {
-            if (typeof showToast === 'function') showToast('文件读取失败');
-        };
-        r.readAsText(file, 'utf-8');
+        // ★ 修复iOS+安卓：所有文件统一走流式处理，不再区分大小，不塞 textarea
+        if (typeof showToast === 'function') showToast('正在读取文件...');
+        _muImportFromFile(file);
     };
-    inp.click();
+
+    // ★ 修复安卓：部分机型需要延迟触发 click
+    setTimeout(function () { inp.click(); }, 50);
 }
 
 // ★ 新增：直接从 File 对象导入，完全绕过 textarea，防止大文件卡死
 function _muImportFromFile(file) {
     var r = new FileReader();
     r.onload = function (e) {
+        var raw = e.target.result;
+        // ★ 立即解除 FileReader 对结果的引用，释放内存
+        r.onload = null;
         setTimeout(function () {
+            var data = null;
             try {
-                var data = JSON.parse(e.target.result);
-                e.target.result = null; // ★ 立即释放原始字符串内存
-                _muDoJsonImportData(data);
+                data = JSON.parse(raw);
             } catch (err) {
                 if (typeof showToast === 'function') showToast('JSON格式错误: ' + (err.message || ''));
+                return;
+            } finally {
+                raw = null; // ★ parse完立即释放原始字符串（iOS内存敏感）
             }
-        }, 30);
+            _muDoJsonImportData(data);
+        }, 50);
     };
     r.onerror = function () {
         if (typeof showToast === 'function') showToast('文件读取失败');
