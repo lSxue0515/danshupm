@@ -5,109 +5,255 @@
     var isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     var isAndroid = /Android/i.test(ua);
     var root = document.documentElement;
+    var lastH = 0;
+    var kbActive = false;
+    var lastKeyboardInset = -1;
+    var keyboardFrame = 0;
+    var chatLockedAppHeight = 0;
 
-    // 确保 class 在（head里已加过一次，这里兜底）
     if (isIOS && !root.classList.contains('is-ios')) root.classList.add('is-ios');
     if (isAndroid && !root.classList.contains('is-android')) root.classList.add('is-android');
 
-    // ========== 实时视口高度 ==========
-    var lastH = 0;
+    function isTextInputElement(el) {
+        if (!el || el.disabled || el.readOnly) return false;
+        var tag = (el.tagName || '').toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+    }
 
-    function setHeight() {
-        if (window.innerWidth > 768) return;
+    function isKeyboardViewportResize() {
+        if (!isIOS || !window.visualViewport) return false;
+        if (!isTextInputElement(document.activeElement)) return false;
 
-        var h = window.innerHeight;
-        if (window.visualViewport) h = window.visualViewport.height;
+        var vvHeight = Math.round(window.visualViewport.height || 0);
+        var innerHeight = Math.round(window.innerHeight || 0);
+        var clientHeight = Math.round(document.documentElement.clientHeight || 0);
+        var baseHeight = Math.max(lastH || 0, innerHeight || 0, clientHeight || 0);
+        return baseHeight > 0 && vvHeight > 0 && baseHeight - vvHeight > 120;
+    }
+
+    function getViewportHeight() {
+        var h = Math.round(window.innerHeight || 0);
+        var clientHeight = Math.round(document.documentElement.clientHeight || 0);
 
         if (isAndroid) {
-            var ch = document.documentElement.clientHeight;
-            if (ch > 0 && ch < h) h = ch;
+            if (clientHeight > 0 && (!h || clientHeight < h)) h = clientHeight;
+        } else if (clientHeight > h) {
+            h = clientHeight;
         }
 
+        if (!isIOS && window.visualViewport && window.visualViewport.height) {
+            h = Math.round(window.visualViewport.height);
+        }
+
+        return Math.round(h);
+    }
+
+    function getChatConversation() {
+        return document.getElementById('chatConversation');
+    }
+
+    function getChatOverlay() {
+        return document.getElementById('chatAppOverlay');
+    }
+
+    function getChatBody() {
+        return document.getElementById('chatConvBody');
+    }
+
+    function getChatBottomBar() {
+        var conv = getChatConversation();
+        return conv ? conv.querySelector('.chat-conv-bottombar') : null;
+    }
+
+    function isChatKeyboardContext() {
+        var conv = getChatConversation();
+        return !!(conv && conv.classList.contains('show'));
+    }
+
+    function getAppliedAppHeight() {
+        var inlineValue = parseFloat(root.style.getPropertyValue('--app-height'));
+        if (inlineValue > 0) return Math.round(inlineValue);
+
+        var computedValue = parseFloat(window.getComputedStyle(root).getPropertyValue('--app-height'));
+        if (computedValue > 0) return Math.round(computedValue);
+
+        return lastH || getViewportHeight();
+    }
+
+    function lockChatAppHeight() {
+        if (!chatLockedAppHeight) chatLockedAppHeight = getAppliedAppHeight();
+        if (!chatLockedAppHeight) return;
+
+        lastH = chatLockedAppHeight;
+        root.style.setProperty('--app-height', chatLockedAppHeight + 'px');
+    }
+
+    function syncChatViewportMetrics() {
+        var conv = getChatConversation();
+        var bottomBar = getChatBottomBar();
+        if (!conv) return;
+
+        if (!bottomBar) {
+            conv.style.setProperty('--chat-conv-bottom-bar-height', '0px');
+            return;
+        }
+
+        var styles = window.getComputedStyle(bottomBar);
+        var marginTop = parseFloat(styles.marginTop) || 0;
+        var marginBottom = parseFloat(styles.marginBottom) || 0;
+        var totalHeight = Math.round(bottomBar.offsetHeight + marginTop + marginBottom);
+        conv.style.setProperty('--chat-conv-bottom-bar-height', totalHeight + 'px');
+    }
+
+    function getChatKeyboardInset() {
+        if (!window.visualViewport) return 0;
+
+        var vv = window.visualViewport;
+        var baseHeight = chatLockedAppHeight || getAppliedAppHeight();
+        var inset = 0;
+
+        if (isIOS) {
+            var vvHeightInset = baseHeight - Math.round(vv.height || 0);
+            var innerHeightInset = baseHeight - Math.round(window.innerHeight || 0);
+            var clientHeightInset = baseHeight - Math.round(document.documentElement.clientHeight || 0);
+            inset = Math.max(vvHeightInset, innerHeightInset, clientHeightInset);
+        } else {
+            inset = baseHeight - Math.round((vv.height || 0) + (vv.offsetTop || 0));
+        }
+
+        if (inset < 0) inset = 0;
+        return inset;
+    }
+
+    function applyChatKeyboardInset(inset) {
+        var conv = getChatConversation();
+        var overlay = getChatOverlay();
+        var nextInset = Math.max(0, Math.round(inset || 0));
+
+        if (nextInset === lastKeyboardInset && conv) return;
+        lastKeyboardInset = nextInset;
+
+        if (conv) {
+            conv.style.setProperty('--chat-keyboard-inset', nextInset + 'px');
+            conv.classList.toggle('chat-keyboard-active', nextInset > 0);
+        }
+
+        if (overlay) {
+            overlay.classList.toggle('chat-keyboard-active', nextInset > 0);
+        }
+    }
+
+    function resetChatKeyboardInset() {
+        if (keyboardFrame) {
+            cancelAnimationFrame(keyboardFrame);
+            keyboardFrame = 0;
+        }
+
+        chatLockedAppHeight = 0;
+        lastKeyboardInset = -1;
+        syncChatViewportMetrics();
+        applyChatKeyboardInset(0);
+    }
+
+    function getBodyBottomGap(body) {
+        return body.scrollHeight - body.clientHeight - body.scrollTop;
+    }
+
+    function shouldKeepBodyPinned(body) {
+        return !!body && getBodyBottomGap(body) <= 72;
+    }
+
+    function setHeight() {
+        if (kbActive && isChatKeyboardContext()) {
+            lockChatAppHeight();
+            return;
+        }
+        if (isKeyboardViewportResize()) return;
+        var h = getViewportHeight();
         if (Math.abs(h - lastH) < 1) return;
         lastH = h;
-
+        chatLockedAppHeight = 0;
         root.style.setProperty('--app-height', h + 'px');
-
-        var frame = document.getElementById('phoneFrame');
-        if (frame) frame.style.height = h + 'px';
     }
 
-    setHeight();
-    window.addEventListener('resize', setHeight);
-    window.addEventListener('orientationchange', function () { setTimeout(setHeight, 300); });
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', setHeight);
+    function onKbResize() {
+        if (window.__disableLegacyChatKeyboard) return;
+        if (window.KeyboardManager && window.KeyboardManager.getActiveContextId && window.KeyboardManager.getActiveContextId() === 'chat-conversation') return;
+        if (kbActive) fixKb();
     }
 
-    // ========== iOS 键盘修复 ==========
-    // 核心：键盘弹出时 visualViewport.height 变小
-    // 我们把 phone-frame 高度缩到可见区域，聊天界面自然跟着缩
+    function fixKb() {
+        if (window.__disableLegacyChatKeyboard) return;
+        if (window.KeyboardManager && window.KeyboardManager.getActiveContextId && window.KeyboardManager.getActiveContextId() === 'chat-conversation') return;
+        if (!kbActive || !isChatKeyboardContext()) return;
 
-    var kbActive = false;
+        if (keyboardFrame) cancelAnimationFrame(keyboardFrame);
+        keyboardFrame = requestAnimationFrame(function () {
+            var body = getChatBody();
+            var keepPinned = shouldKeepBodyPinned(body);
+            var prevInset = lastKeyboardInset;
+            keyboardFrame = 0;
+            lockChatAppHeight();
+            syncChatViewportMetrics();
+            var nextInset = getChatKeyboardInset();
+            applyChatKeyboardInset(nextInset);
+
+            if (body && keepPinned) {
+                if (!isIOS || prevInset < 0 || Math.abs(nextInset - prevInset) > 6) {
+                    body.scrollTop = body.scrollHeight;
+                }
+            }
+        });
+    }
 
     window._chatInputFocus = function () {
+        if (window.__disableLegacyChatKeyboard) return;
+        if (window.KeyboardManager && window.KeyboardManager.getActiveContextId && window.KeyboardManager.getActiveContextId() === 'chat-conversation') return;
+        chatLockedAppHeight = getAppliedAppHeight();
         kbActive = true;
+        lockChatAppHeight();
+        syncChatViewportMetrics();
+        applyChatKeyboardInset(0);
+
         if (isIOS && window.visualViewport) {
             window.visualViewport.addEventListener('resize', onKbResize);
-            window.visualViewport.addEventListener('scroll', onKbScroll);
             setTimeout(fixKb, 100);
             setTimeout(fixKb, 300);
             setTimeout(fixKb, 600);
         }
+
         if (isAndroid) {
             setTimeout(function () {
-                var b = document.getElementById('chatConvBody');
-                if (b) b.scrollTop = b.scrollHeight;
+                var body = getChatBody();
+                if (shouldKeepBodyPinned(body)) body.scrollTop = body.scrollHeight;
             }, 400);
         }
     };
 
     window._chatInputBlur = function () {
+        if (window.__disableLegacyChatKeyboard) return;
+        if (window.KeyboardManager && window.KeyboardManager.getActiveContextId && window.KeyboardManager.getActiveContextId() === 'chat-conversation') return;
         kbActive = false;
+        resetChatKeyboardInset();
+
         if (window.visualViewport) {
             window.visualViewport.removeEventListener('resize', onKbResize);
-            window.visualViewport.removeEventListener('scroll', onKbScroll);
         }
-        // 恢复
-        var conv = document.getElementById('chatConversation');
-        if (conv) conv.style.height = '';
+
         setTimeout(function () {
-            window.scrollTo(0, 0);
             setHeight();
         }, 100);
     };
 
-    function onKbResize() {
-        if (kbActive) fixKb();
+    setHeight();
+    window.addEventListener('resize', setHeight);
+    window.addEventListener('orientationchange', function () {
+        setTimeout(setHeight, 300);
+    });
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', setHeight);
     }
 
-    function onKbScroll() {
-        if (window.visualViewport && window.visualViewport.offsetTop > 0) {
-            window.scrollTo(0, 0);
-        }
-    }
-
-    function fixKb() {
-        if (!kbActive || !window.visualViewport) return;
-
-        var h = window.visualViewport.height;
-
-        // 缩小 phone-frame 到可见高度
-        var frame = document.getElementById('phoneFrame');
-        if (frame) frame.style.height = h + 'px';
-
-        // 聊天容器也缩到这个高度
-        var conv = document.getElementById('chatConversation');
-        if (conv) conv.style.height = h + 'px';
-
-        // 滚到最新消息
-        var body = document.getElementById('chatConvBody');
-        if (body) body.scrollTop = body.scrollHeight;
-
-        // 禁止页面滚动
-        window.scrollTo(0, 0);
-        document.body.scrollTop = 0;
-    }
-
+    window._chatSyncViewportMetrics = syncChatViewportMetrics;
 })();
