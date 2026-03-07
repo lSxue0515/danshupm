@@ -222,7 +222,8 @@
 
 /* ===== 整体容器 ===== */
 .p3-contact-widget {
-    padding: 30px 0 20px;
+    padding: 14px 0 20px;
+    /* 原 30px 改 14px，顶部不再需要大空隙 */
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -506,34 +507,29 @@
 
 .p3-bottom-row {
     display: flex;
-    gap: 16px;
-    /* 增大左右两大部分的间距，参考p2的宽敞感 */
+    gap: 0;
+    /* 间距由内部控制 */
     align-items: flex-start;
 }
 
-/* ===== 左侧 2×2 App（与全局同尺寸 54px） ===== */
+/* ===== 左侧 2×2 App：占 50% 宽 ===== */
 .p3-apps-left {
+    flex: 1;
+    /* ← 关键：用 flex:1 取代固定 width */
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: auto auto;
-    gap: 14px 18px;
-    /* 列间距从 6px 增大到 18px，让猫尾薄荷不那么挤 */
-    flex-shrink: 0;
-    width: 160px;
-    /* 配合间距加大整体宽度 */
-    margin-left: -12px;
-    /* 关键：把整个网格往左拉，这样左列往左，右列也跟着往左 */
+    gap: 14px 10px;
+    margin-left: 0;
+    /* 清除原来的 -12px 负边距 */
     margin-right: 0;
-    /* 去掉之前的右偏移 */
 }
 
-/* =============================================
-   拍立得（Polaroid）小组件
-   ============================================= */
+/* ===== 大拍立得宽度自适应右侧区域 ===== */
 .p3-polaroid {
-    width: 126px;
+    width: 120px;
+    /* 保持原比例，也可改 auto 让它自适应 */
     flex-shrink: 0;
-    margin-left: auto;
     background: #fff;
     border-radius: 3px;
     padding: 6px 6px 0 6px;
@@ -634,44 +630,14 @@
     border-radius: 3px;
 }
 
-/* ====== 拍立得双图排版 ====== */
+/* ===== 右侧拍立得组：同样占 50% ===== */
 .p3-polaroid-group {
+    flex: 1;
+    /* ← 与左侧对等 */
     display: flex;
+    justify-content: center;
+    /* 拍立得在右半区居中 */
     align-items: flex-start;
-    margin-left: -4px;
-    /* 整体组的位置微调 */
-}
-
-/* 确保原来的大拍立得在最上层 */
-.p3-polaroid-group .p3-polaroid:not(.p3-polaroid-sm) {
-    z-index: 2;
     margin-left: 0;
-    /* 清除自带的偏移，交给外层group控制 */
-}
-
-/* 修改小拍立得样式，改为并排 */
-.p3-polaroid-sm {
-    width: 90px;
-    padding: 5px 5px 0 5px;
-    transform: rotate(-4deg);
-    /* 倾斜稍微收一点点，看着更自然 */
-
-    margin-right: 12px;
-    /* ★ 核心重点：把原来的 -30px 改成正数 12px，就能产生合适的空隙 */
-    margin-top: 5px;
-    /* 高度上稍微错开一丢丢，如果想两张图上边缘完全平齐，可以改成 0 */
-    margin-left: 0;
-
-    z-index: 1;
-}
-
-/* 小拍立得悬浮微动 */
-.p3-polaroid-sm:hover {
-    transform: rotate(-3deg) scale(1.02);
-}
-
-/* 缩小小拍立得的文字区高度 */
-.p3-polaroid-sm .p3-polaroid-caption {
-    height: 24px;
-    font-size: 9px;
+    /* 清除原来的 -4px */
 }
