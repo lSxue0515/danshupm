@@ -1,4 +1,5 @@
-const CACHE_NAME = 'danshu-shell-v4';
+const CACHE_NAME = 'danshu-shell-v5';
+
 const SHELL_ASSETS = [
   './index.html',
   './manifest.webmanifest',
@@ -70,6 +71,41 @@ const SHELL_PATHS = new Set(
   })
 );
 
+// ✅ 补上这个函数，之前完全缺失导致 fetch 事件直接报错崩溃
+function shouldHandleRequest(request) {
+  const url = new URL(request.url);
+  return url.origin === self.location.origin && request.method === 'GET';
+}
+
+// ✅ 补上 install：预缓存所有资源，装好后立刻激活不等待
+self.addEventListener('install', function (event) {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(function (cache) {
+      return cache.addAll(SHELL_ASSETS);
+    }).then(function () {
+      return self.skipWaiting();
+    })
+  );
+});
+
+// ✅ 补上 activate：清掉所有旧缓存，立刻接管PWA进程
+self.addEventListener('activate', function (event) {
+  event.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(
+        keys.filter(function (key) {
+          return key !== CACHE_NAME;
+        }).map(function (key) {
+          return caches.delete(key);
+        })
+      );
+    }).then(function () {
+      return self.clients.claim();
+    })
+  );
+});
+
+// ✅ fetch：网络优先，失败降级缓存
 self.addEventListener('fetch', function (event) {
   if (!shouldHandleRequest(event.request)) {
     return;
@@ -77,7 +113,6 @@ self.addEventListener('fetch', function (event) {
 
   event.respondWith(
     fetch(event.request).then(function (networkResponse) {
-      // 网络成功 → 更新缓存并返回
       if (networkResponse && networkResponse.ok && networkResponse.type === 'basic') {
         const requestUrl = new URL(event.request.url);
         if (SHELL_PATHS.has(requestUrl.pathname) || STATIC_EXT_RE.test(requestUrl.pathname)) {
@@ -89,7 +124,6 @@ self.addEventListener('fetch', function (event) {
       }
       return networkResponse;
     }).catch(function () {
-      // 网络失败 → 降级用缓存（离线可用）
       return caches.match(event.request).then(function (cachedResponse) {
         if (cachedResponse) return cachedResponse;
         if (event.request.mode === 'navigate') {
