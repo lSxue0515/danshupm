@@ -510,67 +510,54 @@
                 <!-- ====== 第3页 ====== -->
                 <div class="page page-3">
 
-                    <!-- 联系卡片组件 -->
-                    <div class="p3-contact-widget" id="p3ContactWidget">
+                    <!-- ★ 顶部：个人资料卡片（封面图 + 头像 + 名字 + 签名 + 地区） ★ -->
+                    <div class="p3-profile-widget">
 
-                        <!-- 顶部：头像 + 气泡文字 + 爪印 -->
-                        <div class="p3-contact-top">
-                            <div class="p3-contact-avatar" onclick="p3PickAvatar()">
-                                <img src="" id="p3ContactAvatar" alt="">
-                                <div class="p3-contact-avatar-hint">
+                        <!-- 封面图 -->
+                        <div class="p3-profile-banner" onclick="p3PickProfileBanner()">
+                            <img src="" id="p3ProfileBanner" alt="">
+                            <div class="p3-profile-banner-hint">
+                                <svg viewBox="0 0 24 24" width="32" height="32">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                    <circle cx="8.5" cy="8.5" r="1.5" />
+                                    <polyline points="21 15 16 10 5 21" />
+                                </svg>
+                            </div>
+                        </div>
+
+                        <!-- 头像 -->
+                        <div class="p3-profile-avatar-wrap">
+                            <div class="p3-profile-avatar" onclick="p3PickProfileAvatar()">
+                                <img src="" id="p3ProfileAvatar" alt="">
+                                <div class="p3-profile-avatar-hint">
                                     <svg viewBox="0 0 24 24">
                                         <circle cx="12" cy="8" r="4" />
                                         <path d="M20 21a8 8 0 1 0-16 0" />
                                     </svg>
                                 </div>
                             </div>
-                            <div class="p3-contact-bubble">
-                                <span class="p3-contact-bubble-text" id="p3ContactBubble"
-                                    contenteditable="true">幸好爱是小小的奇迹</span>
-                                <div class="p3-contact-paw">
-                                    <svg viewBox="0 0 24 24" width="22" height="22">
-                                        <ellipse cx="12" cy="16" rx="5" ry="4.5" />
-                                        <circle cx="6" cy="10" r="2.2" />
-                                        <circle cx="10" cy="7.5" r="2" />
-                                        <circle cx="14" cy="7.5" r="2" />
-                                        <circle cx="18" cy="10" r="2.2" />
-                                    </svg>
-                                </div>
+                        </div>
+
+                        <!-- 文字信息 -->
+                        <div class="p3-profile-info">
+                            <span class="p3-profile-name" id="p3ProfileName" contenteditable="true">蛋蛋</span>
+                            <span class="p3-profile-handle" id="p3ProfileHandle" contenteditable="true">@Broken
+                                Memory</span>
+                            <span class="p3-profile-bio" id="p3ProfileBio" contenteditable="true">˙✧ 𝟴𝟴 𝙾𝚋𝚜𝚌𝚞𝚛𝚎
+                                𝚙𝚘𝚎𝚝𝚛𝚢 ˙˙</span>
+                            <div class="p3-profile-location">
+                                <svg viewBox="0 0 24 24" width="12" height="12">
+                                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                                    <circle cx="12" cy="9" r="2.5" />
+                                </svg>
+                                <span class="p3-profile-loc-text" id="p3ProfileLoc" contenteditable="true">日本 东京</span>
                             </div>
                         </div>
 
-                        <!-- 下方信息卡片 -->
-                        <div class="p3-contact-card">
-                            <div class="p3-contact-info">
-                                <div class="p3-contact-row">
-                                    <div class="p3-contact-label">Baby</div>
-                                    <div class="p3-contact-input-wrap">
-                                        <span class="p3-contact-value" id="p3ContactName" contenteditable="true">call
-                                            Aero</span>
-                                        <span class="p3-contact-edit" onclick="p3FocusField('p3ContactName')">修改</span>
-                                    </div>
-                                </div>
-                                <div class="p3-contact-row">
-                                    <div class="p3-contact-label">Contact</div>
-                                    <div class="p3-contact-input-wrap">
-                                        <span class="p3-contact-value" id="p3ContactLink"
-                                            contenteditable="true">http//>Aero's love.com</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="p3-contact-photo" onclick="p3PickPhoto()">
-                                <img src="" id="p3ContactPhoto" alt="">
-                                <div class="p3-contact-photo-hint">
-                                    <svg viewBox="0 0 24 24" width="16" height="16">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                                        <circle cx="8.5" cy="8.5" r="1.5" />
-                                        <polyline points="21 15 16 10 5 21" />
-                                    </svg>
-                                </div>
-                            </div>
-                        </div>
+                    </div>
 
-                        <!-- 下半区：左侧4App + 右侧大拍立得，等宽对等 -->
+                    <!-- 下半区：4App + 大拍立得 -->
+                    <div class="p3-contact-widget" id="p3ContactWidget">
                         <div class="p3-bottom-row">
 
                             <!-- 左侧：2×2 App 网格 -->
@@ -629,7 +616,7 @@
                                 </div>
                             </div>
 
-                            <!-- 右侧：仅大拍立得 -->
+                            <!-- 右侧：大拍立得 -->
                             <div class="p3-polaroid-group">
                                 <div class="p3-polaroid" id="p3Polaroid">
                                     <div class="p3-polaroid-photo" onclick="p3PickTicketImg()">
