@@ -1,4 +1,4 @@
-const CACHE_NAME = 'danshu-shell-v2';
+const CACHE_NAME = 'danshu-shell-v4';
 const SHELL_ASSETS = [
   './index.html',
   './manifest.webmanifest',
@@ -70,77 +70,28 @@ const SHELL_PATHS = new Set(
   })
 );
 
-self.addEventListener('install', function (event) {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(function (cache) {
-      return cache.addAll(SHELL_ASSETS);
-    }).then(function () {
-      return self.skipWaiting();
-    })
-  );
-});
-
-self.addEventListener('activate', function (event) {
-  event.waitUntil(
-    caches.keys().then(function (keys) {
-      return Promise.all(
-        keys.map(function (key) {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-          return Promise.resolve(false);
-        })
-      );
-    }).then(function () {
-      return self.clients.claim();
-    })
-  );
-});
-
-function shouldHandleRequest(request) {
-  if (request.method !== 'GET') {
-    return false;
-  }
-
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) {
-    return false;
-  }
-
-  if (request.mode === 'navigate') {
-    return true;
-  }
-
-  return SHELL_PATHS.has(url.pathname) || STATIC_EXT_RE.test(url.pathname);
-}
-
 self.addEventListener('fetch', function (event) {
   if (!shouldHandleRequest(event.request)) {
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then(function (cachedResponse) {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      return fetch(event.request).then(function (networkResponse) {
-        if (!networkResponse || !networkResponse.ok || networkResponse.type !== 'basic') {
-          return networkResponse;
-        }
-
+    fetch(event.request).then(function (networkResponse) {
+      // 网络成功 → 更新缓存并返回
+      if (networkResponse && networkResponse.ok && networkResponse.type === 'basic') {
         const requestUrl = new URL(event.request.url);
-        if (!SHELL_PATHS.has(requestUrl.pathname) && !STATIC_EXT_RE.test(requestUrl.pathname)) {
-          return networkResponse;
+        if (SHELL_PATHS.has(requestUrl.pathname) || STATIC_EXT_RE.test(requestUrl.pathname)) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then(function (cache) {
+            cache.put(event.request, responseToCache);
+          });
         }
-
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then(function (cache) {
-          cache.put(event.request, responseToCache);
-        });
-        return networkResponse;
-      }).catch(function () {
+      }
+      return networkResponse;
+    }).catch(function () {
+      // 网络失败 → 降级用缓存（离线可用）
+      return caches.match(event.request).then(function (cachedResponse) {
+        if (cachedResponse) return cachedResponse;
         if (event.request.mode === 'navigate') {
           return caches.match('./index.html');
         }
